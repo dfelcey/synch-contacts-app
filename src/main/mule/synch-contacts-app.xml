@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:os="http://www.mulesoft.org/schema/mule/os"
+	xmlns:salesforce="http://www.mulesoft.org/schema/mule/salesforce"
+	xmlns:workday-erpapi="http://www.mulesoft.org/schema/mule/workday-erpapi" xmlns:salesforce-crmapi="http://www.mulesoft.org/schema/mule/salesforce-crmapi" xmlns:crmapi="http://www.mulesoft.org/schema/mule/crmapi" xmlns:erpapi="http://www.mulesoft.org/schema/mule/erpapi" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/erpapi http://www.mulesoft.org/schema/mule/erpapi/current/mule-erpapi.xsd
+http://www.mulesoft.org/schema/mule/salesforce-crmapi http://www.mulesoft.org/schema/mule/salesforce-crmapi/current/mule-salesforce-crmapi.xsd
+http://www.mulesoft.org/schema/mule/workday-erpapi http://www.mulesoft.org/schema/mule/workday-erpapi/current/mule-workday-erpapi.xsd
+http://www.mulesoft.org/schema/mule/salesforce http://www.mulesoft.org/schema/mule/salesforce/current/mule-salesforce.xsd
+http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+	<workday-erpapi:config name="Workday_ERP_API_Config" doc:name="Workday ERP API Config" doc:id="251f921a-946f-4c6d-95d6-6d9862ff9341" property_host="${erp.host}" property_port="${erp.port}" property_protocol="${erp.protocol}" property_basePath="${erp.path}"/>
+	<salesforce-crmapi:config name="Salesforce_CRM_API_Config" doc:name="Salesforce CRM API Config" doc:id="3fa56f96-ba10-4ec9-9e6d-88e1e13c9837" property_host="${crm.host}" property_port="${crm.port}" property_protocol="${crm.protocol}" property_basePath="${crm.path}"/>
+	<configuration-properties doc:name="Configuration properties" doc:id="ea2ed990-d321-4cfb-9200-3854b4ff2ba3" file="${mule.env}-config.properties" />
+	<global-property doc:name="Global Property" doc:id="5e976082-cca9-4d78-9ceb-d0eca09abd7a" name="mule.env" value="test" />
+	<os:object-store name="Object_store" doc:name="Object store" doc:id="ac5374e1-330e-43f6-b7f2-7f57bc800bf7" />
+	<flow name="synch-contacts-flow" doc:id="f292698a-2a66-4946-a12a-d7506ac21bee" >
+		<scheduler doc:name="Scheduler" doc:id="1c046a8d-a7db-4845-bebb-5725986e5c02" >
+			<scheduling-strategy >
+				<fixed-frequency frequency="6000" timeUnit="SECONDS"/>
+			</scheduling-strategy>
+		</scheduler>
+		<logger level="INFO" doc:name="Logger" doc:id="a3ac2c54-c16f-4d0d-8b7d-4ab224f1a0e9" message="Synchinig contacts" />
+		<try doc:name="Try" doc:id="8254f1e0-fc16-425e-8467-85a159896ca2">
+			<os:retrieve doc:name="Get last successful time run" doc:id="c68fc77d-58bc-4128-957b-434c301c3a1d" key="lastRun" target="lastRunDateTime" objectStore="Object_store" targetValue="#[payload as DateTime as String {format: &quot;yyyy-MM-dd'T'hh:mm:ss&quot;}]">
+			<os:default-value><![CDATA[#[0 as DateTime as String {format: "yyyy-MM-dd'T'hh:mm:ss"}]]]></os:default-value>
+		</os:retrieve>
+			<logger level="INFO" doc:name="Log last run time" doc:id="480007fb-d6c3-4a3d-8f30-2aebaf0624d8" message="Last run time: #[vars.lastRunDateTime]" />
+			<salesforce-crmapi:get-contacts doc:name="Get contacts modified since last checked" doc:id="fb27913e-6487-4242-92a0-f4e7b8695952" config-ref="Salesforce_CRM_API_Config" changed-since="#[vars.lastRunDateTime]" />
+			<choice doc:name="Check if contacts to process" doc:id="217341d5-4777-4b31-90d0-d4b9b31987dd">
+				<when expression="#[sizeOf(payload) &gt; 0]">
+					<foreach doc:name="For each modified contact" doc:id="23c3bcee-2e9f-464a-b02c-7ae7c3a56509">
+						<ee:transform doc:name="Create ERP input message" doc:id="038a209c-f1e9-471e-b370-34ff4fedc850">
+							<ee:message>
+								<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	firstname: payload.firstname,
+	phone: payload.phone replace /([^(\d+)])/ with "",
+	created: payload.created as DateTime as String {format: "yyyy-MM-dd'T'hh:mm:ss"},
+	modified: payload.modified as DateTime as String {format: "yyyy-MM-dd'T'hh:mm:ss"},
+	id: payload.id,
+	email: payload.email,
+	lastname: payload.lastname
+}]]></ee:set-payload>
+							</ee:message>
+						</ee:transform>
+						<workday-erpapi:create-contact doc:name="Upsert modified or new contact" doc:id="026fe00a-f740-44fa-99f7-3e301223d39a" config-ref="Workday_ERP_API_Config" />
+						<os:store doc:name="Store last successful run time" doc:id="c4043314-b11e-4bf4-bfdf-d33c44a77114" key="lastRun" objectStore="Object_store">
+							<os:value><![CDATA[#[now() as Number]]]></os:value>
+			</os:store>
+			</foreach>
+				</when>
+				<otherwise>
+					<logger level="INFO" doc:name="Log no modifed contacts" doc:id="54716ca0-5869-49ff-906e-85e7ab31c7b3" message="No modified contacts" />
+				</otherwise>
+			</choice>
+			<error-handler>
+				<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue" doc:id="ffdf274b-b8a2-4363-a838-c0b02b52b3f8" type="WORKDAY-ERPAPI:NOT_FOUND">
+					<logger level="INFO" doc:name="Log not found" doc:id="b4b51b10-94b9-4adb-a8ec-30c15306eb9a" message="Contact not found" />
+				</on-error-continue>
+				<on-error-propagate enableNotifications="true" logException="true" doc:name="Unexpected error" doc:id="e58da897-b856-4447-83b1-cb3fbb2e7652" type="ANY">
+					<logger level="ERROR" doc:name="Log error" doc:id="83b44442-c730-45b8-8b0a-2a162f17bddf" message="Unexpected error: #[error.description]" />
+				</on-error-propagate>
+			</error-handler>
+		</try>
+	</flow>
+</mule>
