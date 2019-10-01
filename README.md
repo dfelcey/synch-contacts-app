@@ -1,8 +1,8 @@
 # Overview
 This Contact Synchronisation application performs uni-directional contact synchronisation from Salesforce to Workday. It's a process API that depends on 2 system APIs;
 
- - workday-erp-app   
- - salesforce-erp-app
+ - [workday-erp-app](https://github.com/dfelcey/workday-erp-app)   
+ - [salesforce-erp-app](https://github.com/dfelcey/salesforce-crm-app)
 
 It runs periodically and;
 
